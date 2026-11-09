@@ -28,13 +28,18 @@ if [[ $EUID -ne 0 ]]; then
     exec sudo "$0" "$@"
 fi
 
-# 3. Verify that the tailscaled daemon is active on startup
+# 3. Verify that the tailscaled daemon is active and the tailnet is Running on startup
 if ! systemctl is-active --quiet tailscaled; then
     gum style --foreground 214 "⚠️  The tailscaled service is currently stopped."
     
     gum spin --spinner dot --title "Starting tailscaled service..." -- \
         systemctl start tailscaled
-    
+    sleep 0.5
+fi
+
+INITIAL_STATE=$(tailscale status --json 2>/dev/null | jq -r '.BackendState // "Unknown"')
+if [[ "$INITIAL_STATE" != "Running" ]]; then
+    gum style --foreground 214 "⚠️  Tailscale backend is currently '$INITIAL_STATE'."
     gum spin --spinner pulse --title "Bringing Tailscale network up (tailscale up)..." -- \
         bash -c "tailscale up && sleep 1.5"
 fi
@@ -51,6 +56,19 @@ refresh_data() {
 
     # a) General backend state (e.g., Running, Stopped, NeedsLogin)
     TS_STATE=$(echo "$status_json" | jq -r '.BackendState // "Unknown"')
+
+    # If Tailscale is not Running, force Current Exit Node to "None" and clear online lists
+    if [[ "$TS_STATE" != "Running" ]]; then
+        TS_CURRENT_EXIT_NODE="None"
+        TS_ONLINE_PEERS=""
+        TS_EXIT_NODES_ONLINE=""
+        TS_EXIT_NODES_OFFLINE=$(echo "$status_json" | jq -r '
+            [ (.Peer // {} | .[]) | select(.ExitNodeOption == true) ]
+            | map("🔴 \(.HostName) (\(.TailscaleIPs[0] // "No IP"))")
+            | join("\n")
+        ')
+        return 0
+    fi
 
     # b) Connected devices (Self + Peers where Online == true)
     TS_ONLINE_PEERS=$(echo "$status_json" | jq -r '
@@ -73,7 +91,7 @@ refresh_data() {
         | join("\n")
     ')
 
-    # d) Currently active Exit Node (Clean .HostName checking ExitNode and ExitNodeStatus)
+    # d) Currently active Exit Node (Only when Running, validating ExitNode == true or ExitNodeStatus.Online == true)
     TS_CURRENT_EXIT_NODE=$(echo "$status_json" | jq -r '
         (.ExitNodeStatus.ID // "") as $exit_id |
         (.ExitNodeStatus.Online // false) as $exit_online |
@@ -98,6 +116,20 @@ pause_prompt() {
 }
 
 connect_exit_node() {
+    # Check if BackendState is not Running; if stopped, bring Tailscale up first and refresh node list
+    local current_backend_state
+    current_backend_state=$(tailscale status --json 2>/dev/null | jq -r '.BackendState // "Unknown"')
+
+    if [[ "$current_backend_state" != "Running" ]]; then
+        gum style --foreground 214 "⚠️  Tailscale is currently disconnected ($current_backend_state)."
+        if ! gum spin --spinner pulse --title "Bringing Tailscale network up first (tailscale up)..." -- \
+            bash -c "tailscale up && sleep 1.5"; then
+            gum style --foreground 196 "❌ Error: Failed to bring Tailscale network up."
+            return 0
+        fi
+        refresh_data
+    fi
+
     # Display notice of offline/unavailable Exit Nodes at the top
     if [[ -n "$TS_EXIT_NODES_OFFLINE" ]]; then
         gum style --border rounded --padding "0 2" --border-foreground 196 --margin "0 0 1 0" \
@@ -136,9 +168,14 @@ connect_exit_node() {
     selected_node_ip=$(echo "$selection" | awk -F'[()]' '{print $2}')
 
     echo ""
-    # Execute connection command with a 1.5s delay to allow tailscaled to update its state
+    # Ensure Tailscale is Running and apply Exit Node configuration with LAN access
     if gum spin --spinner minidot --title "Connecting to $node_name ($selected_node_ip)..." -- \
-        bash -c "tailscale set --exit-node='$selected_node_ip' --exit-node-allow-lan-access=true && sleep 1.5"; then
+        bash -c "
+            if [[ \$(tailscale status --json 2>/dev/null | jq -r '.BackendState') != 'Running' ]]; then
+                tailscale up || exit 1
+            fi
+            tailscale set --exit-node='$selected_node_ip' --exit-node-allow-lan-access=true && sleep 1.5
+        "; then
         
         gum style --border rounded --padding "1 2" --border-foreground 42 \
             "$(gum style --bold --foreground 42 "✅ Connected successfully!")" \
