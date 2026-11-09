@@ -74,8 +74,10 @@ tailgum
 
 ---
 
-## ⚠️ Disclaimer & License
+🤷‍♂️ Contributing, Disclaimer & License
 
-This tool was originally created for personal use and is shared with the community **"as-is"**, without warranty of any kind. Feel free to fork, modify, and adapt it to your own workflow.
+I built this purely because I was too lazy to type long commands, and it is shared "as-is" with zero warranties.
 
-Released under the [MIT License](LICENSE).
+If by some miracle you actually find this useful (honestly, I doubt anyone besides me will) and want to add or fix something, feel free to send a commit / open a Pull Request. Otherwise, just fork it and break it on your own machine.
+
+Released under the MIT License.
