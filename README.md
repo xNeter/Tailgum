@@ -1,4 +1,4 @@
-# tailgum
+# Tailgum
 
 A lightweight, interactive Terminal User Interface (TUI) built with **Bash**, **Gum**, and **JQ** to manage your Tailscale connection and switch Exit Nodes (with local LAN access enabled) without memorizing or typing long CLI commands.
 
